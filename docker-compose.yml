@@ -1,0 +1,16 @@
+services:
+  gateway-service:
+    build: .
+    container_name: gateway-service
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    networks:
+      - backend-network
+
+networks:
+  backend-network:
+
+volumes:
+  mongo-data:

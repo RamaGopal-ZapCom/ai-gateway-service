@@ -1,0 +1,81 @@
+#!/bin/sh
+
+echo "***** Running unit tests *****"
+
+# Stash uncommitted changes
+stash_commit="$(git stash create)"
+git stash push -u -k -m "pre-commit-temp"
+
+# Run unit tests
+./gradlew test
+status=$?
+
+# Re-apply stashed changes if any
+if [ -n "${stash_commit}" ]; then
+    git stash apply "${stash_commit}"
+fi
+
+echo "***** Running static code checks *****"
+
+# Java source files to scan
+FILES=$(find ./src -name "*.java")
+
+# Initialize fail flag
+fail=0
+
+# Check for common issues
+for file in $FILES; do
+    # 1. Check for unused imports
+    imports=$(grep -E '^import .*;' "$file")
+    while IFS= read -r line; do
+        imported_class=$(echo "$line" | sed -E 's/import (static )?([a-zA-Z0-9_.]+);/\2/' | awk -F'.' '{print $NF}')
+        if [ -n "$imported_class" ]; then
+            usage_count=$(grep -ow "$imported_class" "$file" | wc -l)
+            if [ "$usage_count" -le 1 ]; then
+                echo "⚠️  [Unused Import] $file: $line"
+                fail=1
+            fi
+        fi
+    done <<< "$imports"
+
+##################################
+# Rule 2: Import Order
+##################################
+imports=$(grep '^import ' "$file")
+sorted=$(echo "$imports" | sort)
+if [ "$imports" != "$sorted" ]; then
+    echo "⚠️  [Import Order] $file: import statements not sorted."
+    fail=1
+fi
+
+##################################
+# Rule 3: Circular Imports
+##################################
+base=$(basename "$file" .java)
+if grep -q "import.*$base" "$file"; then
+    echo "⚠️  [Circular Import] $file: imports itself."
+    fail=1
+fi
+
+
+##################################
+# Rule 4: Trailing Whitespace
+##################################
+if grep -q '[[:blank:]]$' "$file"; then
+    echo "⚠️  [Trailing Whitespace] $file: contains trailing whitespace."
+    fail=1
+fi
+
+done
+
+echo "***** Done with static code checks *****"
+
+if [ "$status" -ne 0 ] || [ "$fail" -ne 0 ]; then
+    echo "❌ Pre-commit checks failed."
+    exit 1
+fi
+
+echo "✅ Pre-commit checks passed!"
+exit 0
+
+
